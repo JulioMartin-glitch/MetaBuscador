@@ -11,6 +11,16 @@ st.set_page_config(page_title="Meta-Buscador Biotech Oficial", layout="wide")
 st.title("🧬 Meta-Buscador Biotech en Tiempo Real")
 st.markdown("Buscando simultáneamente en: **BioLynx (Mapa)**, **AseBio** y **ES-OPENSCREEN**.")
 
+# =========================================================================
+# NOTA EXPLICATIVA / ASPIRACIÓN DEL METABUSCADOR
+# =========================================================================
+with st.expander("ℹ️ Nota sobre el comportamiento de las fuentes y el buscador global"):
+    st.markdown("""
+    * **BioLynx (Mapa):** Busca en nombre, descripción y coordenadas geográficas (ideal para ciudades como Madrid o Barcelona).
+    * **AseBio y ES-OPENSCREEN:** Actualmente buscan de forma directa en los títulos y catálogos principales. 
+    * *Aspiración en desarrollo:* Para buscar en **cualquier campo interno** (direcciones postales, descripciones profundas o provincias) de AseBio y OpenScreen sin congelar la app, el sistema requiere implementar un **rastreador con caché previa (`@st.cache_data`)** que descargue y analice las fichas internas de los socios en segundo plano al iniciar.
+    """)
+
 buscar = st.text_input("Introduce el término a buscar (ej: Madrid, Barcelona, CSIC, Farmacos, Biotech):")
 
 if buscar:
@@ -23,7 +33,7 @@ if buscar:
     }
 
     # =========================================================================
-    # 1. FUENTE: MAPA BIOLYNX (KML Completo)
+    # 1. FUENTE: MAPA BIOLYNX (KML Completo - Búsqueda global en campos)
     # =========================================================================
     with st.spinner("Consultando base de datos de BioLynx..."):
         try:
@@ -74,7 +84,7 @@ if buscar:
             st.error(f"Error en AseBio: {e}")
 
     # =========================================================================
-    # 3. FUENTE: ES-OPENSCREEN (Incluida con control de estado)
+    # 3. FUENTE: ES-OPENSCREEN (Observatorio de Partners)
     # =========================================================================
     with st.spinner("Consultando ES-OPENSCREEN..."):
         try:
@@ -83,7 +93,6 @@ if buscar:
             
             if res_os.status_code == 200:
                 soup_os = BeautifulSoup(res_os.text, 'html.parser')
-                # Buscamos de forma amplia por si hay alguna coincidencia estática o en texto general
                 elementos_os = soup_os.find_all(['h3', 'h4', 'h5', 'strong', 'a', 'p'])
                 
                 encontrados_os = 0
@@ -98,10 +107,6 @@ if buscar:
                                 "Directorio de Origen": "ES-OPENSCREEN"
                             })
                             encontrados_os += 1
-                
-                # Aviso informativo si la fuente responde pero no arroja datos debido a su estructura JS
-                if encontrados_os == 0:
-                    st.toast("ES-OPENSCREEN respondió pero no se hallaron coincidencias estáticas (contenido dinámico JS).", icon="ℹ️")
         except Exception as e:
             st.warning(f"Aviso en ES-OpenScreen: {e}")
 
