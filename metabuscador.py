@@ -4,16 +4,18 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import urllib3
 
+# Desactivamos advertencias de seguridad SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Meta-Buscador Biotech Oficial", layout="wide")
 st.title("🧬 Meta-Buscador Biotech en Tiempo Real")
+st.markdown("Consultando simultáneamente: **BioLynx (Mapa)**, **AseBio** y **ES-OPENSCREEN**.")
 
 buscar = st.text_input("Introduce el término a buscar (ej: Madrid, Barcelona, CSIC, Farmacos):")
 
 if buscar:
     termino = buscar.strip().lower()
-    st.info(f"Procesando búsqueda para: **'{buscar}'**...")
+    st.info(f"Buscando en vivo para: **'{buscar}'**...")
     resultados_finales = []
     
     headers = {
@@ -21,7 +23,7 @@ if buscar:
     }
 
     # =========================================================================
-    # 1. FUENTE PRINCIPAL: MAPA BIOLYNX (KML Completo - 100% Funcional)
+    # 1. FUENTE: MAPA BIOLYNX (KML Completo - Alta fiabilidad)
     # =========================================================================
     with st.spinner("Consultando base de datos de BioLynx..."):
         try:
@@ -47,22 +49,69 @@ if buscar:
             st.error(f"Error en BioLynx: {e}")
 
     # =========================================================================
-    # 2 & 3. AVISO INFORMATIVO SOBRE ASEBIO Y OPENSCREEN
+    # 2. FUENTE: ASEBIO (Directorio Oficial de Socios)
     # =========================================================================
-    # Explicamos al usuario de forma transparente por qué estas webs requieren 
-    # navegación real o APIs privadas cerradas.
-    st.toast("AseBio y ES-OpenScreen aplican restricciones anti-bot o carga por JavaScript.", icon="ℹ️")
+    with st.spinner("Consultando directorio oficial de AseBio..."):
+        try:
+            url_asebio = "https://www.asebio.com/socios/directorio-empresas-biotecnologia"
+            res_ab = requests.get(url_asebio, headers=headers, timeout=10, verify=False)
+            
+            if res_ab.status_code == 200:
+                soup_ab = BeautifulSoup(res_ab.text, 'html.parser')
+                enlaces_socios = soup_ab.find_all('a', href=True)
+                
+                for a in enlaces_socios:
+                    href = a['href']
+                    texto = a.text.strip()
+                    if '/socios/' in href and termino in texto.lower() and len(texto) > 2:
+                        resultados_finales.append({
+                            "Entidad Encontrada": texto,
+                            "Ubicación / Sede": "España (AseBio)",
+                            "Rol / Detalle": "Socio / Empresa Biotecnológica Asociada",
+                            "Directorio de Origen": "AseBio"
+                        })
+        except Exception as e:
+            st.error(f"Error en AseBio: {e}")
 
     # =========================================================================
-    # RENDERIZADO FINAL
+    # 3. FUENTE: ES-OPENSCREEN (Observatorio de Partners - Escaneo Amplio)
+    # =========================================================================
+    with st.spinner("Consultando ES-OPENSCREEN..."):
+        try:
+            url_openscreen = "https://www.es-openscreen.com/partner/"
+            res_os = requests.get(url_openscreen, headers=headers, timeout=10, verify=False)
+            
+            if res_os.status_code == 200:
+                soup_os = BeautifulSoup(res_os.text, 'html.parser')
+                
+                # Buscamos en múltiples etiquetas de texto por si hay menciones estáticas
+                elementos_texto = soup_os.find_all(['h3', 'h4', 'h5', 'strong', 'a', 'p'])
+                
+                for el in elementos_texto:
+                    texto = el.text.strip()
+                    # Filtramos textos razonables que contengan el término de búsqueda
+                    if termino in texto.lower() and 3 < len(texto) < 100:
+                        resultados_finales.append({
+                            "Entidad Encontrada": texto,
+                            "Ubicación / Sede": "Red ES-OPENSCREEN",
+                            "Rol / Detalle": "Entidad / Nodo Asociado en Observatorio",
+                            "Directorio de Origen": "ES-OPENSCREEN"
+                        })
+        except Exception as e:
+            st.error(f"Error en ES-OpenScreen: {e}")
+
+    # =========================================================================
+    # RENDERIZADO FINAL Y CONSOLIDACIÓN DE DATOS
     # =========================================================================
     df_temp = pd.DataFrame(resultados_finales)
+    
     if not df_temp.empty:
+        # Eliminamos duplicados si una entidad aparece repetida entre fuentes
         df_temp = df_temp.drop_duplicates(subset=["Entidad Encontrada"])
-        st.success(f"¡Se han encontrado {len(df_temp)} registros coincidentes en las fuentes activas!")
+        st.success(f"¡Se han consolidado {len(df_temp)} registros de las fuentes configuradas!")
         st.dataframe(df_temp, use_container_width=True)
         
-        # Opcional: Botón de descarga directa
+        # Botón de descarga en CSV
         csv = df_temp.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Descargar resultados en CSV",
@@ -71,4 +120,4 @@ if buscar:
             mime="text/csv",
         )
     else:
-        st.warning(f"No se han encontrado registros para '{buscar}'. Prueba con términos como 'Madrid', 'Barcelona', 'Bio' o 'Pharma'.")
+        st.warning(f"No se han encontrado registros para '{buscar}'. Prueba con términos comunes como 'Madrid', 'Barcelona', 'Bio' o 'Pharma'.")
