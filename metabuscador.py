@@ -9,7 +9,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Meta-Buscador Biotech Oficial", layout="wide")
 st.title("🧬 Meta-Buscador Biotech en Tiempo Real")
-st.markdown("Buscando simultáneamente en: **BioLynx (Mapa)**, **AseBio** y **ES-OPENSCREEN**.")
+st.markdown("Buscando en simultáneo en: **BioLynx (Mapa)**, **AseBio** y **ES-OPENSCREEN**.")
 
 buscar = st.text_input("Introduce el término a buscar (ej: Madrid, Barcelona, CSIC, Farmacos, Biotech):")
 
@@ -23,7 +23,7 @@ if buscar:
     }
 
     # =========================================================================
-    # 1. FUENTE: MAPA BIOLYNX (KML Completo)
+    # 1. FUENTE: MAPA BIOLYNX (KML Completo - Ideal para ciudades y regiones)
     # =========================================================================
     with st.spinner("Consultando base de datos de BioLynx..."):
         try:
@@ -49,7 +49,7 @@ if buscar:
             st.error(f"Error en BioLynx: {e}")
 
     # =========================================================================
-    # 2. FUENTE: ASEBIO (Directorio Oficial de Socios)
+    # 2. FUENTE: ASEBIO (Búsqueda por enlaces de socios)
     # =========================================================================
     with st.spinner("Consultando directorio oficial de AseBio..."):
         try:
@@ -58,41 +58,44 @@ if buscar:
             
             if res_ab.status_code == 200:
                 soup_ab = BeautifulSoup(res_ab.text, 'html.parser')
-                bloques_asebio = soup_ab.find_all(['a', 'div', 'span', 'p', 'li', 'h3', 'h4'])
+                enlaces_socios = soup_ab.find_all('a', href=True)
                 
-                for b in bloques_asebio:
-                    texto = b.text.strip()
-                    # Filtramos para capturar nombres de empresas y descripciones relevantes
-                    if termino in texto.lower() and 3 <= len(texto) <= 120:
-                        # Excluimos menús o textos genéricos de la web
-                        if not any(p in texto.lower() for p in ['aviso legal', 'cookies', 'política', 'iniciar sesión', 'menú', 'buscar', 'contacto', 'español']):
-                            resultados_finales.append({
-                                "Entidad Encontrada": texto,
-                                "Ubicación / Sede": "España (AseBio)",
-                                "Rol / Detalle": "Socio / Empresa Asociada",
-                                "Directorio de Origen": "AseBio"
-                            })
+                for a in enlaces_socios:
+                    href = a['href']
+                    texto = a.text.strip()
+                    # Filtramos enlaces que pertenecen a fichas de socios de Asebio
+                    if '/socios/' in href and termino in texto.lower() and len(texto) > 2:
+                        resultados_finales.append({
+                            "Entidad Encontrada": texto,
+                            "Ubicación / Sede": "España (AseBio)",
+                            "Rol / Detalle": "Socio / Empresa Biotecnológica Asociada",
+                            "Directorio de Origen": "AseBio"
+                        })
         except Exception as e:
             st.error(f"Error en AseBio: {e}")
 
     # =========================================================================
-    # 3. FUENTE: ES-OPENSCREEN (Observatorio de Partners)
+    # 3. FUENTE: ES-OPENSCREEN (Búsqueda por enlaces de partners)
     # =========================================================================
-    with st.spinner("Consultando ES-OPENSCREEN..."):
+    with st.spinner("Consultando red de ES-OPENSCREEN..."):
         try:
             url_openscreen = "https://www.es-openscreen.com/partner/"
             res_os = requests.get(url_openscreen, headers=headers, timeout=10, verify=False)
             
             if res_os.status_code == 200:
                 soup_os = BeautifulSoup(res_os.text, 'html.parser')
-                bloques_os = soup_os.find_all(['h3', 'h4', 'h5', 'strong', 'a', 'p', 'div'])
+                enlaces_partners = soup_os.find_all('a', href=True)
                 
-                for el in bloques_os:
-                    texto = el.text.strip()
-                    if termino in texto.lower() and 3 <= len(texto) <= 150:
-                        if not any(p in texto.lower() for p in ['cookie', 'aviso', 'home', 'contacto', 'menu', 'search']):
+                for a in enlaces_partners:
+                    href = a['href']
+                    texto = a.text.strip()
+                    # Filtramos enlaces que apuntan específicamente a subpáginas de partners
+                    if '/partner/' in href and href != "https://www.es-openscreen.com/partner/" and href != "/partner/":
+                        # Si el texto del enlace o la URL (slug) contiene el término buscado
+                        if termino in texto.lower() or termino in href.lower():
+                            nombre_limpiado = texto if len(texto) > 2 else href.split('/')[-2].replace('-', ' ').title()
                             resultados_finales.append({
-                                "Entidad Encontrada": texto,
+                                "Entidad Encontrada": nombre_limpiado,
                                 "Ubicación / Sede": "Red ES-OPENSCREEN",
                                 "Rol / Detalle": "Entidad / Nodo Asociado",
                                 "Directorio de Origen": "ES-OPENSCREEN"
@@ -108,7 +111,7 @@ if buscar:
     if not df_temp.empty:
         # Eliminamos duplicados exactos
         df_temp = df_temp.drop_duplicates(subset=["Entidad Encontrada"])
-        st.success(f"¡Se han encontrado {len(df_temp)} registros coincidentes en las fuentes!")
+        st.success(f"¡Se han encontrado {len(df_temp)} registros coincidentes en total!")
         st.dataframe(df_temp, use_container_width=True)
         
         # Botón de descarga en CSV
@@ -120,4 +123,4 @@ if buscar:
             mime="text/csv",
         )
     else:
-        st.warning(f"No se han encontrado registros para '{buscar}'. Prueba con términos como 'Madrid', 'Barcelona', 'España', 'Bio' o 'Pharma'.")
+        st.warning(f"No se han encontrado registros para '{buscar}'. Prueba con términos como nombres de socios específicos, 'Bio', 'Madrid' o 'Pharma'.")
