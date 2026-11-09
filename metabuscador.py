@@ -9,13 +9,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Meta-Buscador Biotech Oficial", layout="wide")
 st.title("🧬 Meta-Buscador Biotech en Tiempo Real")
-st.markdown("Consultando simultáneamente: **BioLynx (Mapa)**, **AseBio** y **ES-OPENSCREEN**.")
+st.markdown("Buscando simultáneamente en profundidad en: **BioLynx (Mapa)**, **AseBio** y **ES-OPENSCREEN**.")
 
-buscar = st.text_input("Introduce el término a buscar (ej: Madrid, Barcelona, CSIC, Farmacos):")
+buscar = st.text_input("Introduce el término a buscar (ej: Madrid, Barcelona, CSIC, Farmacos, Biotech):")
 
 if buscar:
     termino = buscar.strip().lower()
-    st.info(f"Buscando en vivo para: **'{buscar}'**...")
+    st.info(f"Buscando en profundidad para: **'{buscar}'**...")
     resultados_finales = []
     
     headers = {
@@ -23,7 +23,7 @@ if buscar:
     }
 
     # =========================================================================
-    # 1. FUENTE: MAPA BIOLYNX (KML Completo - Alta fiabilidad)
+    # 1. FUENTE: MAPA BIOLYNX (KML Completo)
     # =========================================================================
     with st.spinner("Consultando base de datos de BioLynx..."):
         try:
@@ -49,34 +49,49 @@ if buscar:
             st.error(f"Error en BioLynx: {e}")
 
     # =========================================================================
-    # 2. FUENTE: ASEBIO (Directorio Oficial de Socios)
+    # 2. FUENTE: ASEBIO (Análisis profundo del directorio de socios)
     # =========================================================================
-    with st.spinner("Consultando directorio oficial de AseBio..."):
+    with st.spinner("Analizando directorio en profundidad de AseBio..."):
         try:
             url_asebio = "https://www.asebio.com/socios/directorio-empresas-biotecnologia"
             res_ab = requests.get(url_asebio, headers=headers, timeout=10, verify=False)
             
             if res_ab.status_code == 200:
                 soup_ab = BeautifulSoup(res_ab.text, 'html.parser')
-                enlaces_socios = soup_ab.find_all('a', href=True)
                 
-                for a in enlaces_socios:
-                    href = a['href']
-                    texto = a.text.strip()
-                    if '/socios/' in href and termino in texto.lower() and len(texto) > 2:
+                # Buscamos en elementos de lista, tarjetas de empresas y enlaces internos
+                elementos_asebio = soup_ab.find_all(['li', 'div', 'a', 'span'], class_=lambda x: x and ('socio' in x or 'item' in x or 'views-field' in x or 'node' in x))
+                
+                # Si los selectores específicos son muy restrictivos, respaldamos con todos los enlaces de socios
+                todos_enlaces = soup_ab.find_all('a', href=True)
+                
+                candidatos = set()
+                for el in elementos_asebio:
+                    txt = el.text.strip()
+                    if len(txt) > 2 and len(txt) < 100:
+                        candidatos.add(txt)
+                        
+                for a in todos_enlaces:
+                    if '/socios/' in a['href']:
+                        txt_enlace = a.text.strip()
+                        if len(txt_enlace) > 2:
+                            candidatos.add(txt_enlace)
+
+                for texto_candidato in candidatos:
+                    if termino in texto_candidato.lower():
                         resultados_finales.append({
-                            "Entidad Encontrada": texto,
+                            "Entidad Encontrada": texto_candidato,
                             "Ubicación / Sede": "España (AseBio)",
-                            "Rol / Detalle": "Socio / Empresa Biotecnológica Asociada",
+                            "Rol / Detalle": "Socio / Empresa Asociada",
                             "Directorio de Origen": "AseBio"
                         })
         except Exception as e:
             st.error(f"Error en AseBio: {e}")
 
     # =========================================================================
-    # 3. FUENTE: ES-OPENSCREEN (Observatorio de Partners - Escaneo Amplio)
+    # 3. FUENTE: ES-OPENSCREEN (Análisis profundo de partners y observatorio)
     # =========================================================================
-    with st.spinner("Consultando ES-OPENSCREEN..."):
+    with st.spinner("Analizando red y socios de ES-OPENSCREEN..."):
         try:
             url_openscreen = "https://www.es-openscreen.com/partner/"
             res_os = requests.get(url_openscreen, headers=headers, timeout=10, verify=False)
@@ -84,17 +99,21 @@ if buscar:
             if res_os.status_code == 200:
                 soup_os = BeautifulSoup(res_os.text, 'html.parser')
                 
-                # Buscamos en múltiples etiquetas de texto por si hay menciones estáticas
-                elementos_texto = soup_os.find_all(['h3', 'h4', 'h5', 'strong', 'a', 'p'])
+                # Extraemos bloques de texto, títulos, párrafos y tarjetas de partners
+                bloques_os = soup_os.find_all(['h3', 'h4', 'h5', 'strong', 'a', 'p', 'div'], class_=lambda x: x and ('partner' in x or 'item' in x or 'content' in x))
                 
-                for el in elementos_texto:
-                    texto = el.text.strip()
-                    # Filtramos textos razonables que contengan el término de búsqueda
-                    if termino in texto.lower() and 3 < len(texto) < 100:
+                candidatos_os = set()
+                for bloque in bloques_os:
+                    txt = bloque.text.strip()
+                    if len(txt) > 2 and len(txt) < 120:
+                        candidatos_os.add(txt)
+                        
+                for texto_os in candidatos_os:
+                    if termino in texto_os.lower():
                         resultados_finales.append({
-                            "Entidad Encontrada": texto,
+                            "Entidad Encontrada": texto_os,
                             "Ubicación / Sede": "Red ES-OPENSCREEN",
-                            "Rol / Detalle": "Entidad / Nodo Asociado en Observatorio",
+                            "Rol / Detalle": "Entidad / Nodo Asociado",
                             "Directorio de Origen": "ES-OPENSCREEN"
                         })
         except Exception as e:
@@ -106,9 +125,9 @@ if buscar:
     df_temp = pd.DataFrame(resultados_finales)
     
     if not df_temp.empty:
-        # Eliminamos duplicados si una entidad aparece repetida entre fuentes
+        # Eliminamos duplicados exactos
         df_temp = df_temp.drop_duplicates(subset=["Entidad Encontrada"])
-        st.success(f"¡Se han consolidado {len(df_temp)} registros de las fuentes configuradas!")
+        st.success(f"¡Se han consolidado {len(df_temp)} registros coincidentes en las tres fuentes!")
         st.dataframe(df_temp, use_container_width=True)
         
         # Botón de descarga en CSV
@@ -120,4 +139,4 @@ if buscar:
             mime="text/csv",
         )
     else:
-        st.warning(f"No se han encontrado registros para '{buscar}'. Prueba con términos comunes como 'Madrid', 'Barcelona', 'Bio' o 'Pharma'.")
+        st.warning(f"No se han encontrado registros para '{buscar}'. Prueba con términos como 'Madrid', 'Barcelona', 'España' o 'Bio'.")
