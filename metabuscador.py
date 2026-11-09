@@ -17,7 +17,7 @@ buscar = st.text_input("Introduce un término para rastrear en los 3 directorios
 if buscar:
     st.info(f"Conectando en tiempo real con los directorios oficiales para buscar: '{buscar}'...")
     termino = buscar.lower()
-    resultados_totales = []  # CORREGIDO: Se añaden los corchetes para la lista vacía
+    resultados_totales = []  # CORREGIDO: Se añaden los corchetes obligatorios para evitar el SyntaxError
 
     # =========================================================================
     # 1. CONSULTA EN VIVO A ASEBIO (Tu URL Oficial)
