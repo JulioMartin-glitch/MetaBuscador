@@ -3,16 +3,40 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import urllib3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desactivamos advertencias de seguridad SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Meta-Buscador Biotech Global", layout="wide")
-st.title("🧬 Meta-Buscador Biotech Global (Indexado Total)")
-st.markdown("Búsqueda avanzada en profundidad en BioLynx, AseBio y ES-OPENSCREEN.")
+st.title("🧬 Meta-Buscador Biotech Global (Indexado Rápido)")
+st.markdown("Búsqueda avanzada en profundidad optimizada con descargas paralelas.")
 
 # =========================================================================
-# FUNCIÓN CACHEADA: Indexación profunda en las 3 fuentes
+# FUNCIÓN AUXILIAR PARA DESCARGAR UNA FICHA RÁPIDO
+# =========================================================================
+def procesar_ficha_socio(url_socio, headers):
+    try:
+        res_socio = requests.get(url_socio, headers=headers, timeout=4, verify=False)
+        if res_socio.status_code == 200:
+            soup_socio = BeautifulSoup(res_socio.text, 'html.parser')
+            h1 = soup_socio.find('h1')
+            nombre_socio = h1.text.strip() if h1 else "Empresa AseBio"
+            cuerpo_texto = " ".join([p.text.strip() for p in soup_socio.find_all(['p', 'div', 'span', 'li']) if len(p.text.strip()) > 3])
+            
+            return {
+                "Entidad Encontrada": nombre_socio,
+                "Ubicación / Sede": "España (AseBio Ficha)",
+                "Rol / Detalle": cuerpo_texto[:150] + "..." if len(cuerpo_texto) > 150 else "Socio AseBio",
+                "Directorio de Origen": "AseBio",
+                "Texto Buscable": f"{nombre_socio} {cuerpo_texto} {url_socio}".lower()
+            }
+    except:
+        pass
+    return None
+
+# =========================================================================
+# FUNCIÓN CACHEADA: Indexación total paralela
 # =========================================================================
 @st.cache_data(ttl=3600)
 def cargar_y_indexar_total():
@@ -22,11 +46,11 @@ def cargar_y_indexar_total():
     }
 
     # -------------------------------------------------------------------------
-    # 1. FUENTE: MAPA BIOLYNX (KML Geográfico)
+    # 1. FUENTE: MAPA BIOLYNX (KML)
     # -------------------------------------------------------------------------
     try:
         url_mapa_kml = "https://www.google.com/maps/d/u/0/kml?mid=1hCVAxvUdzUIu6XVaoNjTDvfckdBavpI&forcekml=1"
-        res_mapa = requests.get(url_mapa_kml, headers=headers, timeout=12, verify=False)
+        res_mapa = requests.get(url_mapa_kml, headers=headers, timeout=10, verify=False)
         
         if res_mapa.status_code == 200:
             soup_mapa = BeautifulSoup(res_mapa.text, 'xml')
@@ -47,7 +71,7 @@ def cargar_y_indexar_total():
         print(f"Error BioLynx: {e}")
 
     # -------------------------------------------------------------------------
-    # 2. FUENTE: ASEBIO (Fichas Internas de Socios)
+    # 2. FUENTE: ASEBIO (Fichas en Paralelo con hilos)
     # -------------------------------------------------------------------------
     try:
         url_asebio = "https://www.asebio.com/socios/directorio-empresas-biotecnologia"
@@ -66,29 +90,18 @@ def cargar_y_indexar_total():
                     else:
                         urls_socios.add("https://www.asebio.com" + href)
 
-            for url_socio in list(urls_socios):
-                try:
-                    res_socio = requests.get(url_socio, headers=headers, timeout=5, verify=False)
-                    if res_socio.status_code == 200:
-                        soup_socio = BeautifulSoup(res_socio.text, 'html.parser')
-                        h1 = soup_socio.find('h1')
-                        nombre_socio = h1.text.strip() if h1 else "Empresa AseBio"
-                        cuerpo_texto = " ".join([p.text.strip() for p in soup_socio.find_all(['p', 'div', 'span', 'li']) if len(p.text.strip()) > 3])
-                        
-                        registros.append({
-                            "Entidad Encontrada": nombre_socio,
-                            "Ubicación / Sede": "España (AseBio Ficha)",
-                            "Rol / Detalle": cuerpo_texto[:150] + "..." if len(cuerpo_texto) > 150 else "Socio AseBio",
-                            "Directorio de Origen": "AseBio",
-                            "Texto Buscable": f"{nombre_socio} {cuerpo_texto} {url_socio}".lower()
-                        })
-                except:
-                    continue
+            # Lanzamos peticiones simultáneas (hasta 10 hilos a la vez para máxima velocidad)
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(procesar_ficha_socio, url, headers) for url in urls_socios]
+                for future in as_completed(futures):
+                    resultado = future.result()
+                    if resultado:
+                        registros.append(resultado)
     except Exception as e:
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Rastreo Profundo de Bloques y Partners)
+    # 3. FUENTE: ES-OPENSCREEN
     # -------------------------------------------------------------------------
     try:
         url_openscreen = "https://www.es-openscreen.com/partner/"
@@ -96,13 +109,10 @@ def cargar_y_indexar_total():
         
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
-            
-            # Recorremos bloques amplios de texto (párrafos, títulos, celdas de tablas y listas)
             elementos_os = soup_os.find_all(['h1', 'h2', 'h3', 'h4', 'p', 'li', 'td', 'div'])
             
             for el in elementos_os:
                 texto_bloque = el.text.strip()
-                # Filtramos para descartar menús, avisos de cookies y textos vacíos o gigantes
                 if 5 <= len(texto_bloque) <= 200:
                     if not any(p in texto_bloque.lower() for p in ['cookie', 'aviso', 'home', 'contacto', 'menu', 'privacy', 'copyright']):
                         registros.append({
@@ -124,10 +134,10 @@ def cargar_y_indexar_total():
 # INTERFAZ DE USUARIO EN STREAMLIT
 # =========================================================================
 
-with st.spinner("Indexando todas las fuentes en profundidad (esto puede tardar unos segundos la primera vez)..."):
+with st.spinner("Indexando en paralelo (esto tardará solo un par de segundos)..."):
     df_master = cargar_y_indexar_total()
 
-st.success(f"Base de datos global indexada con **{len(df_master)} registros** totales listos para buscar.")
+st.success(f"Base de datos global indexada con **{len(df_master)} registros** en profundidad listos para buscar.")
 
 buscar = st.text_input("Introduce cualquier término (ej: Madrid, Barcelona, CSIC, Farmacos, Biotech):")
 
@@ -135,7 +145,6 @@ if buscar:
     termino = buscar.strip().lower()
     st.info(f"Buscando en todos los campos y fuentes para: **'{buscar}'**...")
     
-    # Búsqueda global cruzada
     df_filtrado = df_master[df_master["Texto Buscable"].str.contains(termino, na=False)].copy()
     
     if not df_filtrado.empty:
