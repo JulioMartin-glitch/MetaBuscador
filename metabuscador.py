@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import urllib3
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 # Desactivamos advertencias de seguridad SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
