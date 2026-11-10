@@ -22,7 +22,7 @@ with col1:
 with col2:
     st.info("🏢 **AseBio**\n\nDirectorio Empresarial & Fichas")
 with col3:
-    st.info("🔬 **ES-OPENSCREEN**\n\n*(Bloque en fase de refinado)*")
+    st.info("🔬 **ES-OPENSCREEN**\n\n*(Captura de prueba para refinado)*")
 
 st.divider()
 
@@ -50,7 +50,7 @@ def procesar_ficha_asebio(url_socio, headers):
     return None
 
 # =========================================================================
-# FUNCIÓN CACHEADA: Indexación total con desglose de fuentes
+# FUNCIÓN CACHEADA: Indexación total
 # =========================================================================
 @st.cache_data(ttl=86400)
 def cargar_y_indexar_total():
@@ -60,7 +60,7 @@ def cargar_y_indexar_total():
     }
 
     # -------------------------------------------------------------------------
-    # 1. FUENTE: BIOLYNX (Máximo rendimiento KML)
+    # 1. FUENTE: BIOLYNX (Mapa KML)
     # -------------------------------------------------------------------------
     try:
         url_mapa = "https://www.google.com/maps/d/u/0/kml?mid=1hCVAxvUdzUIu6XVaoNjTDvfckdBavpI&forcekml=1"
@@ -83,7 +83,7 @@ def cargar_y_indexar_total():
         print(f"Error BioLynx: {e}")
 
     # -------------------------------------------------------------------------
-    # 2. FUENTE: ASEBIO (Indexación masiva en paralelo)
+    # 2. FUENTE: ASEBIO (Directorio de Empresas)
     # -------------------------------------------------------------------------
     try:
         url_asebio = "https://www.asebio.com/socios/directorio-empresas-biotecnologia"
@@ -107,34 +107,43 @@ def cargar_y_indexar_total():
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Captura amplia para refinado)
+    # 3. FUENTE: ES-OPENSCREEN (Selector abierto de respaldo)
     # -------------------------------------------------------------------------
     try:
         url_openscreen = "https://www.es-openscreen.com/partner/"
         res_os = requests.get(url_openscreen, headers=headers, timeout=12, verify=False)
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
-            bloques = soup_os.find_all(['article', 'div', 'section', 'li'], class_=lambda x: x and any(c in str(x).lower() for c in ['partner', 'node', 'member', 'grid', 'item', 'entry']))
             
-            if not bloques:
-                bloques = soup_os.find_all(['div', 'li', 'section'])
-
-            for bloque in bloques:
-                titulo_el = bloque.find(['h2', 'h3', 'h4', 'strong', 'b'])
-                if titulo_el:
-                    nombre = titulo_el.text.strip()
-                    cuerpo = bloque.text.strip()
-                    if len(nombre) > 3:
-                        detalle = cuerpo.replace(nombre, "").strip()
-                        detalle = " ".join(detalle.split())
-                        
+            # Recogemos enlaces relevantes o títulos para garantizar que extraiga contenido
+            elementos_capturados = set()
+            
+            for a in soup_os.find_all('a', href=True):
+                texto = a.text.strip()
+                href = a['href']
+                if len(texto) > 3 and ('partner' in href or 'nodo' in href or 'member' in href):
+                    if texto not in elementos_capturados:
+                        elementos_capturados.add(texto)
                         registros.append({
-                            "Entidad Encontrada": nombre,
+                            "Entidad Encontrada": texto,
                             "Ubicación / Sede": "Red ES-OPENSCREEN",
-                            "Rol / Detalle": detalle[:180] + "..." if len(detalle) > 180 else "Nodo ES-OPENSCREEN",
+                            "Rol / Detalle": f"Enlace detectado: {href}",
                             "Directorio de Origen": "ES-OPENSCREEN",
-                            "Texto Buscable": f"{nombre} {cuerpo}".lower()
+                            "Texto Buscable": f"{texto} {href}".lower()
                         })
+            
+            # Respaldo por encabezados si el filtrado de enlaces aporta pocos
+            for h in soup_os.find_all(['h2', 'h3', 'h4']):
+                texto = h.text.strip()
+                if len(texto) > 4 and texto not in elementos_capturados:
+                    elementos_capturados.add(texto)
+                    registros.append({
+                        "Entidad Encontrada": texto,
+                        "Ubicación / Sede": "Red ES-OPENSCREEN",
+                        "Rol / Detalle": "Encabezado de red ES-OPENSCREEN",
+                        "Directorio de Origen": "ES-OPENSCREEN",
+                        "Texto Buscable": texto.lower()
+                    })
     except Exception as e:
         print(f"Error ES-OPENSCREEN: {e}")
 
@@ -147,17 +156,16 @@ def cargar_y_indexar_total():
 # =========================================================================
 # EJECUCIÓN E INTERFAZ DE BÚSQUEDA
 # =========================================================================
-with st.spinner("Indexando máximos de BioLynx, AseBio y ES-OPENSCREEN..."):
+with st.spinner("Indexando directorios (BioLynx, AseBio, ES-OPENSCREEN)..."):
     df_master = cargar_y_indexar_total()
 
-# Métricas en pantalla para ver qué aporta cada fuente exactamente
 if not df_master.empty:
     n_bio = len(df_master[df_master["Directorio de Origen"] == "BioLynx"])
     n_ase = len(df_master[df_master["Directorio de Origen"] == "AseBio"])
     n_os = len(df_master[df_master["Directorio de Origen"] == "ES-OPENSCREEN"])
     
     st.success(f"Base de datos global indexada con **{len(df_master)} registros totales**.")
-    st.caption(f"📊 **Desglose de fuentes:** BioLynx: `{n_bio}` | AseBio: `{n_ase}` | ES-OPENSCREEN (A refinar): `{n_os}`")
+    st.caption(f"📊 **Desglose de fuentes:** BioLynx: `{n_bio}` | AseBio: `{n_ase}` | ES-OPENSCREEN: `{n_os}`")
 
 buscar = st.text_input("🔍 Introduce un término de búsqueda (ej: Madrid, CSIC, Cáncer, Barcelona, Screening):")
 
