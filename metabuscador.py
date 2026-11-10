@@ -49,46 +49,6 @@ def procesar_ficha_asebio(url_socio, headers):
         pass
     return None
 
-def procesar_ficha_openscreen(url_partner, headers):
-    try:
-        res = requests.get(url_partner, headers=headers, timeout=4, verify=False)
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.text, 'html.parser')
-            
-            # Limpiamos elementos innecesarios de la web (menús, footers, etc.)
-            for element in soup(["nav", "footer", "header", "aside", "script", "style"]):
-                element.decompose()
-
-            # Buscamos el título limpio
-            h1 = soup.find('h1')
-            nombre = h1.text.strip() if h1 else ""
-            
-            if not nombre or len(nombre) < 3 or any(w in nombre.lower() for w in ['archive', 'partners', 'sobre el nodo', 'observatorio']):
-                title_tag = soup.find('title')
-                if title_tag:
-                    nombre = title_tag.text.split('|')[0].split('-')[0].strip()
-            
-            if not nombre:
-                nombre = "Nodo ES-OPENSCREEN"
-
-            # Extraemos texto solo del contenedor principal
-            contenido_principal = soup.find('main') or soup.find('article') or soup.find('div', class_='content') or soup
-            cuerpo = " ".join([p.text.strip() for p in contenido_principal.find_all(['p', 'div', 'li', 'td']) if len(p.text.strip()) > 3])
-            
-            # Limpiamos duplicados extraños de texto concatenado
-            cuerpo = " ".join(dict.fromkeys(cuerpo.split())) 
-
-            return {
-                "Entidad Encontrada": nombre,
-                "Ubicación / Sede": "Red ES-OPENSCREEN",
-                "Rol / Detalle": cuerpo[:180] + "..." if len(cuerpo) > 180 else "Plataforma / Nodo ES-OPENSCREEN",
-                "Directorio de Origen": "ES-OPENSCREEN",
-                "Texto Buscable": f"{nombre} {cuerpo} {url_partner}".lower()
-            }
-    except:
-        pass
-    return None
-
 # =========================================================================
 # FUNCIÓN CACHEADA: Indexación total rápida en paralelo
 # =========================================================================
@@ -146,29 +106,39 @@ def cargar_y_indexar_total():
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Filtrado Limpio)
+    # 3. FUENTE: ES-OPENSCREEN (Extracción Estructurada Directa)
     # -------------------------------------------------------------------------
     try:
         url_openscreen = "https://www.es-openscreen.com/partner/"
         res_os = requests.get(url_openscreen, headers=headers, timeout=10, verify=False)
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
-            urls_os = set()
             
-            for a in soup_os.find_all('a', href=True):
-                href = a['href']
-                if any(sub in href for sub in ['/partner/', '/nodo/', '/member/', '/socio/']):
-                    if len(href) > 10 and not href.endswith('/partner/'):
-                        full_url = href if href.startswith('http') else "https://www.es-openscreen.com" + href
-                        urls_os.add(full_url)
+            # Buscamos bloques de artículos, tarjetas o contenedores de socios en la página
+            bloques = soup_os.find_all(['article', 'div', 'section'], class_=lambda x: x and any(c in str(x).lower() for c in ['partner', 'node', 'member', 'grid', 'item', 'entry']))
             
-            if urls_os:
-                with ThreadPoolExecutor(max_workers=10) as executor:
-                    futures = [executor.submit(procesar_ficha_openscreen, url, headers) for url in urls_os]
-                    for future in as_completed(futures):
-                        res = future.result()
-                        if res:
-                            registros.append(res)
+            if not bloques:
+                # Si no hay clases específicas, cogemos todos los contenedores de títulos de la página
+                bloques = soup_os.find_all(['div', 'li'])
+
+            for bloque in bloques:
+                titulo_el = bloque.find(['h2', 'h3', 'h4', 'strong'])
+                if titulo_el:
+                    nombre = titulo_el.text.strip()
+                    cuerpo = bloque.text.strip()
+                    
+                    # Filtramos basura de plantillas de WordPress
+                    if len(nombre) > 3 and not any(w in nombre.lower() for w in ['archive', 'partners', 'menu', 'contacto', 'aviso', 'cookie']):
+                        # Evitamos duplicar el nombre dentro del detalle
+                        detalle_limpio = cuerpo.replace(nombre, "").strip()
+                        
+                        registros.append({
+                            "Entidad Encontrada": nombre,
+                            "Ubicación / Sede": "Red ES-OPENSCREEN",
+                            "Rol / Detalle": detalle_limpio[:180] + "..." if len(detalle_limpio) > 180 else (detalle_limpio or "Nodo ES-OPENSCREEN"),
+                            "Directorio de Origen": "ES-OPENSCREEN",
+                            "Texto Buscable": f"{nombre} {cuerpo}".lower()
+                        })
     except Exception as e:
         print(f"Error ES-OPENSCREEN: {e}")
 
@@ -180,7 +150,7 @@ def cargar_y_indexar_total():
 # =========================================================================
 # EJECUCIÓN E INTERFAZ DE BÚSQUEDA
 # =========================================================================
-with st.spinner("Indexando BioLynx, AseBio y ES-OPENSCREEN en paralelo..."):
+with st.spinner("Indexando BioLynx, AseBio y ES-OPENSCREEN..."):
     df_master = cargar_y_indexar_total()
 
 st.success(f"Base de datos global indexada correctamente con **{len(df_master)} registros** entre los 3 directorios.")
@@ -202,7 +172,7 @@ if buscar:
             label="📥 Descargar resultados en CSV",
             data=csv,
             file_name=f"busqueda_biotech_{buscar}.csv",
-            mime="text/csv",
+            mime="text/css",
         )
     else:
         st.warning(f"No se han encontrado resultados para **'{buscar}'**.")
