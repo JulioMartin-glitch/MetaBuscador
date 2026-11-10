@@ -9,34 +9,69 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Meta-Buscador Biotech Global", layout="wide")
-st.title("🧬 Meta-Buscador Biotech Global (Indexado Rápido)")
-st.markdown("Búsqueda avanzada en profundidad optimizada con descargas paralelas.")
 
 # =========================================================================
-# FUNCIÓN AUXILIAR PARA DESCARGAR UNA FICHA RÁPIDO
+# CABECERA E INDICADORES DE DIRECTORIOS
 # =========================================================================
-def procesar_ficha_socio(url_socio, headers):
+st.title("🧬 Meta-Buscador Biotech Global")
+st.markdown("Búsqueda unificada en profundidad en los tres grandes directorios del sector biotecnológico:")
+
+# Indicadores visuales de los 3 directorios en la cabecera
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.info("📍 **BioLynx**\n\nDirectorio Geográfico & KML")
+with col2:
+    st.info("🏢 **AseBio**\n\nDirectorio Empresarial & Fichas")
+with col3:
+    st.info("🔬 **ES-OPENSCREEN**\n\nRed de Nodos & Plataformas")
+
+st.divider()
+
+# =========================================================================
+# FUNCIONES AUXILIARES DE RASTREO PARALELO
+# =========================================================================
+def procesar_ficha_asebio(url_socio, headers):
     try:
-        res_socio = requests.get(url_socio, headers=headers, timeout=4, verify=False)
-        if res_socio.status_code == 200:
-            soup_socio = BeautifulSoup(res_socio.text, 'html.parser')
-            h1 = soup_socio.find('h1')
-            nombre_socio = h1.text.strip() if h1 else "Empresa AseBio"
-            cuerpo_texto = " ".join([p.text.strip() for p in soup_socio.find_all(['p', 'div', 'span', 'li']) if len(p.text.strip()) > 3])
+        res = requests.get(url_socio, headers=headers, timeout=4, verify=False)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            h1 = soup.find('h1')
+            nombre = h1.text.strip() if h1 else "Empresa AseBio"
+            cuerpo = " ".join([p.text.strip() for p in soup.find_all(['p', 'div', 'span', 'li']) if len(p.text.strip()) > 3])
             
             return {
-                "Entidad Encontrada": nombre_socio,
-                "Ubicación / Sede": "España (AseBio Ficha)",
-                "Rol / Detalle": cuerpo_texto[:150] + "..." if len(cuerpo_texto) > 150 else "Socio AseBio",
+                "Entidad Encontrada": nombre,
+                "Ubicación / Sede": "España (AseBio)",
+                "Rol / Detalle": cuerpo[:180] + "..." if len(cuerpo) > 180 else "Socio AseBio",
                 "Directorio de Origen": "AseBio",
-                "Texto Buscable": f"{nombre_socio} {cuerpo_texto} {url_socio}".lower()
+                "Texto Buscable": f"{nombre} {cuerpo} {url_socio}".lower()
+            }
+    except:
+        pass
+    return None
+
+def procesar_ficha_openscreen(url_partner, headers):
+    try:
+        res = requests.get(url_partner, headers=headers, timeout=4, verify=False)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            h1_h2 = soup.find(['h1', 'h2'])
+            nombre = h1_h2.text.strip() if h1_h2 else "Nodo ES-OPENSCREEN"
+            cuerpo = " ".join([p.text.strip() for p in soup.find_all(['p', 'div', 'li', 'td']) if len(p.text.strip()) > 3])
+            
+            return {
+                "Entidad Encontrada": nombre,
+                "Ubicación / Sede": "Red ES-OPENSCREEN",
+                "Rol / Detalle": cuerpo[:180] + "..." if len(cuerpo) > 180 else "Plataforma / Nodo ES-OPENSCREEN",
+                "Directorio de Origen": "ES-OPENSCREEN",
+                "Texto Buscable": f"{nombre} {cuerpo} {url_partner}".lower()
             }
     except:
         pass
     return None
 
 # =========================================================================
-# FUNCIÓN CACHEADA: Indexación total paralela
+# FUNCIÓN CACHEADA: Indexación total rápida en paralelo
 # =========================================================================
 @st.cache_data(ttl=3600)
 def cargar_y_indexar_total():
@@ -46,84 +81,92 @@ def cargar_y_indexar_total():
     }
 
     # -------------------------------------------------------------------------
-    # 1. FUENTE: MAPA BIOLYNX (KML)
+    # 1. FUENTE: BIOLYNX (Mapa KML)
     # -------------------------------------------------------------------------
     try:
-        url_mapa_kml = "https://www.google.com/maps/d/u/0/kml?mid=1hCVAxvUdzUIu6XVaoNjTDvfckdBavpI&forcekml=1"
-        res_mapa = requests.get(url_mapa_kml, headers=headers, timeout=10, verify=False)
-        
+        url_mapa = "https://www.google.com/maps/d/u/0/kml?mid=1hCVAxvUdzUIu6XVaoNjTDvfckdBavpI&forcekml=1"
+        res_mapa = requests.get(url_mapa, headers=headers, timeout=10, verify=False)
         if res_mapa.status_code == 200:
             soup_mapa = BeautifulSoup(res_mapa.text, 'xml')
-            marcadores = soup_mapa.find_all('Placemark')
-            
-            for marcador in marcadores:
+            for marcador in soup_mapa.find_all('Placemark'):
                 nombre = marcador.find('name').text.strip() if marcador.find('name') else ""
                 descripcion = marcador.find('description').text.strip() if marcador.find('description') else ""
                 
                 registros.append({
                     "Entidad Encontrada": nombre,
-                    "Ubicación / Sede": "España (Mapeado Geo)",
-                    "Rol / Detalle": descripcion[:150] + "..." if len(descripcion) > 150 else descripcion,
-                    "Directorio de Origen": "BioLynx (Mapa)",
+                    "Ubicación / Sede": "España (BioLynx)",
+                    "Rol / Detalle": descripcion[:180] + "..." if len(descripcion) > 180 else descripcion,
+                    "Directorio de Origen": "BioLynx",
                     "Texto Buscable": f"{nombre} {descripcion}".lower()
                 })
     except Exception as e:
         print(f"Error BioLynx: {e}")
 
     # -------------------------------------------------------------------------
-    # 2. FUENTE: ASEBIO (Fichas en Paralelo con hilos)
+    # 2. FUENTE: ASEBIO (Indexación Profunda en Paralelo)
     # -------------------------------------------------------------------------
     try:
         url_asebio = "https://www.asebio.com/socios/directorio-empresas-biotecnologia"
         res_ab = requests.get(url_asebio, headers=headers, timeout=10, verify=False)
-        
         if res_ab.status_code == 200:
             soup_ab = BeautifulSoup(res_ab.text, 'html.parser')
-            enlaces_socios = soup_ab.find_all('a', href=True)
-            
-            urls_socios = set()
-            for a in enlaces_socios:
+            urls_ab = set()
+            for a in soup_ab.find_all('a', href=True):
                 href = a['href']
                 if '/socios/' in href and len(href) > 8:
-                    if href.startswith('http'):
-                        urls_socios.add(href)
-                    else:
-                        urls_socios.add("https://www.asebio.com" + href)
+                    full_url = href if href.startswith('http') else "https://www.asebio.com" + href
+                    urls_ab.add(full_url)
 
-            # Lanzamos peticiones simultáneas (hasta 10 hilos a la vez para máxima velocidad)
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(procesar_ficha_socio, url, headers) for url in urls_socios]
+                futures = [executor.submit(procesar_ficha_asebio, url, headers) for url in urls_ab]
                 for future in as_completed(futures):
-                    resultado = future.result()
-                    if resultado:
-                        registros.append(resultado)
+                    res = future.result()
+                    if res:
+                        registros.append(res)
     except Exception as e:
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN
+    # 3. FUENTE: ES-OPENSCREEN (Indexación Profunda de Nodos y Partners)
     # -------------------------------------------------------------------------
     try:
         url_openscreen = "https://www.es-openscreen.com/partner/"
         res_os = requests.get(url_openscreen, headers=headers, timeout=10, verify=False)
-        
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
-            elementos_os = soup_os.find_all(['h1', 'h2', 'h3', 'h4', 'p', 'li', 'td', 'div'])
+            urls_os = set()
             
-            for el in elementos_os:
-                texto_bloque = el.text.strip()
-                if 5 <= len(texto_bloque) <= 200:
-                    if not any(p in texto_bloque.lower() for p in ['cookie', 'aviso', 'home', 'contacto', 'menu', 'privacy', 'copyright']):
+            # Buscamos enlaces a socios/nodos específicos de ES-OPENSCREEN
+            for a in soup_os.find_all('a', href=True):
+                href = a['href']
+                if '/partner/' in href or '/nodo/' in href or '/member/' in href:
+                    if len(href) > 10 and not href.endswith('/partner/'):
+                        full_url = href if href.startswith('http') else "https://www.es-openscreen.com" + href
+                        urls_os.add(full_url)
+            
+            # Si se encuentran fichas internas, las leemos en paralelo
+            if urls_os:
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = [executor.submit(procesar_ficha_openscreen, url, headers) for url in urls_os]
+                    for future in as_completed(futures):
+                        res = future.result()
+                        if res:
+                            registros.append(res)
+            
+            # Respaldos directos de bloques por si la web es de página única
+            for el in soup_os.find_all(['h2', 'h3', 'h4', 'p', 'li']):
+                texto = el.text.strip()
+                if 10 <= len(texto) <= 250:
+                    if not any(k in texto.lower() for k in ['cookie', 'privacy', 'copyright', 'contacto', 'menu']):
                         registros.append({
-                            "Entidad Encontrada": texto_bloque[:60] + "..." if len(texto_bloque) > 60 else texto_bloque,
+                            "Entidad Encontrada": texto[:60] + "...",
                             "Ubicación / Sede": "Red ES-OPENSCREEN",
-                            "Rol / Detalle": "Mención / Nodo en Observatorio",
+                            "Rol / Detalle": texto,
                             "Directorio de Origen": "ES-OPENSCREEN",
-                            "Texto Buscable": texto_bloque.lower()
+                            "Texto Buscable": texto.lower()
                         })
     except Exception as e:
-        print(f"Error ES-OpenScreen: {e}")
+        print(f"Error ES-OPENSCREEN: {e}")
 
     df_global = pd.DataFrame(registros)
     if not df_global.empty:
@@ -131,24 +174,22 @@ def cargar_y_indexar_total():
     return df_global
 
 # =========================================================================
-# INTERFAZ DE USUARIO EN STREAMLIT
+# EJECUCIÓN E INTERFAZ DE BÚSQUEDA
 # =========================================================================
-
-with st.spinner("Indexando en paralelo (esto tardará solo un par de segundos)..."):
+with st.spinner("Indexando BioLynx, AseBio y ES-OPENSCREEN en paralelo..."):
     df_master = cargar_y_indexar_total()
 
-st.success(f"Base de datos global indexada con **{len(df_master)} registros** en profundidad listos para buscar.")
+# Métricas rápidas de los datos listos
+st.success(f"Base de datos global indexada correctamente con **{len(df_master)} registros** entre los 3 directorios.")
 
-buscar = st.text_input("Introduce cualquier término (ej: Madrid, Barcelona, CSIC, Farmacos, Biotech):")
+buscar = st.text_input("🔍 Introduce un término de búsqueda (ej: Madrid, CSIC, Cáncer, Barcelona, Screening):")
 
 if buscar:
     termino = buscar.strip().lower()
-    st.info(f"Buscando en todos los campos y fuentes para: **'{buscar}'**...")
-    
     df_filtrado = df_master[df_master["Texto Buscable"].str.contains(termino, na=False)].copy()
     
     if not df_filtrado.empty:
-        st.success(f"¡Se han encontrado {len(df_filtrado)} coincidencias en total!")
+        st.success(f"¡Se han encontrado **{len(df_filtrado)}** coincidencias totales!")
         
         df_mostrar = df_filtrado[["Entidad Encontrada", "Ubicación / Sede", "Rol / Detalle", "Directorio de Origen"]]
         st.dataframe(df_mostrar, use_container_width=True)
@@ -157,8 +198,8 @@ if buscar:
         st.download_button(
             label="📥 Descargar resultados en CSV",
             data=csv,
-            file_name=f"biotech_resultados_{buscar}.csv",
+            file_name=f"busqueda_biotech_{buscar}.csv",
             mime="text/csv",
         )
     else:
-        st.warning(f"No se ha encontrado ninguna coincidencia para '{buscar}' en las fuentes indexadas.")
+        st.warning(f"No se han encontrado resultados para **'{buscar}'**.")
