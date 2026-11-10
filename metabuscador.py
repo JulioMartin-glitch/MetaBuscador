@@ -3,8 +3,6 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import urllib3
-import re
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desactivamos advertencias de seguridad SSL
@@ -24,7 +22,7 @@ with col1:
 with col2:
     st.info("🏢 **AseBio**\n\nDirectorio Empresarial & Fichas")
 with col3:
-    st.info("🔬 **ES-OPENSCREEN**\n\nRed de Nodos & Plataformas")
+    st.info("🔬 **ES-OPENSCREEN**\n\n*(Bloque en fase de refinado)*")
 
 st.divider()
 
@@ -52,7 +50,7 @@ def procesar_ficha_asebio(url_socio, headers):
     return None
 
 # =========================================================================
-# FUNCIÓN CACHEADA: Indexación masiva y estable (Caché 24h)
+# FUNCIÓN CACHEADA: Indexación total con desglose de fuentes
 # =========================================================================
 @st.cache_data(ttl=86400)
 def cargar_y_indexar_total():
@@ -62,7 +60,7 @@ def cargar_y_indexar_total():
     }
 
     # -------------------------------------------------------------------------
-    # 1. FUENTE: BIOLYNX (Mapa KML - Volumen completo)
+    # 1. FUENTE: BIOLYNX (Máximo rendimiento KML)
     # -------------------------------------------------------------------------
     try:
         url_mapa = "https://www.google.com/maps/d/u/0/kml?mid=1hCVAxvUdzUIu6XVaoNjTDvfckdBavpI&forcekml=1"
@@ -85,7 +83,7 @@ def cargar_y_indexar_total():
         print(f"Error BioLynx: {e}")
 
     # -------------------------------------------------------------------------
-    # 2. FUENTE: ASEBIO (Directorio de Empresas en Paralelo)
+    # 2. FUENTE: ASEBIO (Indexación masiva en paralelo)
     # -------------------------------------------------------------------------
     try:
         url_asebio = "https://www.asebio.com/socios/directorio-empresas-biotecnologia"
@@ -109,15 +107,13 @@ def cargar_y_indexar_total():
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Captura amplia sin descartes masivos)
+    # 3. FUENTE: ES-OPENSCREEN (Captura amplia para refinado)
     # -------------------------------------------------------------------------
     try:
         url_openscreen = "https://www.es-openscreen.com/partner/"
         res_os = requests.get(url_openscreen, headers=headers, timeout=12, verify=False)
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
-            
-            # Recogemos todos los bloques estructurados de la página de partners
             bloques = soup_os.find_all(['article', 'div', 'section', 'li'], class_=lambda x: x and any(c in str(x).lower() for c in ['partner', 'node', 'member', 'grid', 'item', 'entry']))
             
             if not bloques:
@@ -128,16 +124,14 @@ def cargar_y_indexar_total():
                 if titulo_el:
                     nombre = titulo_el.text.strip()
                     cuerpo = bloque.text.strip()
-                    
-                    # Filtro suave único para evitar menús del sistema evidentes
-                    if len(nombre) > 3 and not any(w in nombre.lower() for w in ['inicia sesión', 'contraseña', 'recuérdame']):
+                    if len(nombre) > 3:
                         detalle = cuerpo.replace(nombre, "").strip()
                         detalle = " ".join(detalle.split())
                         
                         registros.append({
                             "Entidad Encontrada": nombre,
                             "Ubicación / Sede": "Red ES-OPENSCREEN",
-                            "Rol / Detalle": detalle[:180] + "..." if len(detalle) > 180 else (detalle or "Nodo ES-OPENSCREEN"),
+                            "Rol / Detalle": detalle[:180] + "..." if len(detalle) > 180 else "Nodo ES-OPENSCREEN",
                             "Directorio de Origen": "ES-OPENSCREEN",
                             "Texto Buscable": f"{nombre} {cuerpo}".lower()
                         })
@@ -146,7 +140,6 @@ def cargar_y_indexar_total():
 
     df_global = pd.DataFrame(registros)
     if not df_global.empty:
-        # Eliminamos únicamente duplicados exactos del texto buscable para conservar el máximo volumen
         df_global = df_global.drop_duplicates(subset=["Texto Buscable"])
         
     return df_global
@@ -154,10 +147,17 @@ def cargar_y_indexar_total():
 # =========================================================================
 # EJECUCIÓN E INTERFAZ DE BÚSQUEDA
 # =========================================================================
-with st.spinner("Indexando masivamente BioLynx, AseBio y ES-OPENSCREEN..."):
+with st.spinner("Indexando máximos de BioLynx, AseBio y ES-OPENSCREEN..."):
     df_master = cargar_y_indexar_total()
 
-st.success(f"Base de datos global indexada correctamente con **{len(df_master)} registros** máximos estables.")
+# Métricas en pantalla para ver qué aporta cada fuente exactamente
+if not df_master.empty:
+    n_bio = len(df_master[df_master["Directorio de Origen"] == "BioLynx"])
+    n_ase = len(df_master[df_master["Directorio de Origen"] == "AseBio"])
+    n_os = len(df_master[df_master["Directorio de Origen"] == "ES-OPENSCREEN"])
+    
+    st.success(f"Base de datos global indexada con **{len(df_master)} registros totales**.")
+    st.caption(f"📊 **Desglose de fuentes:** BioLynx: `{n_bio}` | AseBio: `{n_ase}` | ES-OPENSCREEN (A refinar): `{n_os}`")
 
 buscar = st.text_input("🔍 Introduce un término de búsqueda (ej: Madrid, CSIC, Cáncer, Barcelona, Screening):")
 
