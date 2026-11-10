@@ -3,6 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import urllib3
+import re
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desactivamos advertencias de seguridad SSL
@@ -106,52 +108,79 @@ def cargar_y_indexar_total():
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Vista Mapa/Listado Directa)
+    # 3. FUENTE: ES-OPENSCREEN (Extracción de Scripts/Mapa JSON + Nodos Limpios)
     # -------------------------------------------------------------------------
     try:
         url_openscreen = "https://www.es-openscreen.com/partner/?view=map&s="
-        res_os = requests.get(url_openscreen, headers=headers, timeout=10, verify=False)
+        res_os = requests.get(url_openscreen, headers=headers, timeout=12, verify=False)
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
             
-            # Buscamos elementos de lista o bloques específicos de la vista de partners
-            elementos_lista = soup_os.find_all(['div', 'li', 'article', 'tr'], class_=lambda x: x and any(c in str(x).lower() for c in ['partner', 'node', 'member', 'item', 'list', 'marker']))
-            
-            if not elementos_lista:
-                elementos_lista = soup_os.find_all(['div', 'li'])
+            # 1. Intentar extraer los marcadores JSON inyectados en los scripts del mapa
+            nodos_encontrados = False
+            scripts = soup_os.find_all('script')
+            for script in scripts:
+                if script.string and ('marker' in script.string.lower() or 'partner' in script.string.lower()):
+                    matches = re.findall(r'\{[^{}]*"title"[^{}]*\}|\{[^{}]*"name"[^{}]*\}', script.string)
+                    for match in matches:
+                        try:
+                            data = json.loads(match)
+                            nombre_nodo = data.get('title') or data.get('name')
+                            if nombre_nodo and len(nombre_nodo) > 3:
+                                registros.append({
+                                    "Entidad Encontrada": nombre_nodo.strip(),
+                                    "Ubicación / Sede": "Red ES-OPENSCREEN",
+                                    "Rol / Detalle": f"Nodo / Plataforma ES-OPENSCREEN - {data.get('address', '')}".strip(),
+                                    "Directorio de Origen": "ES-OPENSCREEN",
+                                    "Texto Buscable": f"{nombre_nodo} {data.get('address', '')}".lower()
+                                })
+                                nodos_encontrados = True
+                        except:
+                            continue
 
-            blacklist_openscreen = [
-                'archive', 'partners', 'menu', 'contacto', 'aviso', 'cookie', 
-                'quiero participar', 'observatorio', 'inicio', 'home', 'red es-openscreen',
-                'inicia sesión', 'nombre de usuario', 'contraseña', 'recuérdame'
-            ]
-
-            for el in elementos_lista:
-                # Buscamos un título o texto destacado dentro del elemento
-                titulo_el = el.find(['h2', 'h3', 'h4', 'strong', 'b', 'a'])
-                if titulo_el:
-                    nombre = titulo_el.text.strip()
-                    cuerpo = el.text.strip()
+            # 2. Si no viene en JSON de Script, desestructurar tarjetas quitando Menús y Logins
+            if not nodos_encontrados:
+                for elemento_basura in soup_os(['header', 'footer', 'nav', 'aside', 'form']):
+                    elemento_basura.decompose()
                     
-                    # Limpiamos prefijos
+                bloques = soup_os.find_all(['article', 'div'], class_=lambda x: x and any(c in str(x).lower() for c in ['post', 'type-partner', 'partner-item', 'location-item', 'map-list']))
+                
+                if not bloques:
+                    main_content = soup_os.find('main') or soup_os.find('div', id='content') or soup_os
+                    bloques = main_content.find_all(['h2', 'h3', 'h4'])
+
+                blacklist_estricta = [
+                    'inicia sesión', 'usuario', 'contraseña', 'recuérdame', 'observatorio',
+                    'quiero participar', 'comité', 'arsenio', 'sofía', 'beatriz', 'raquel',
+                    'amelia', 'lourdes', 'emilio', 'jordi', 'archive', 'partners archive'
+                ]
+
+                for el in bloques:
+                    if el.name in ['h2', 'h3', 'h4']:
+                        nombre = el.text.strip()
+                        cuerpo = el.parent.text.strip() if el.parent else nombre
+                    else:
+                        titulo_el = el.find(['h2', 'h3', 'h4', 'strong', 'a'])
+                        nombre = titulo_el.text.strip() if titulo_el else ""
+                        cuerpo = el.text.strip()
+
                     for prefijo in ["Coordinador:", "Coordinator:", "Partner:", "Nodo:"]:
                         if nombre.lower().startswith(prefijo.lower()):
                             nombre = nombre[len(prefijo):].strip()
 
-                    # Verificamos que sea un nombre válido y no basura de interfaz
-                    if 4 <= len(nombre) <= 120 and not any(w in nombre.lower() for w in blacklist_openscreen):
-                        detalle_limpio = cuerpo.replace(nombre, "").strip()
-                        detalle_limpio = " ".join(detalle_limpio.split())
-
+                    if len(nombre) > 4 and not any(b in nombre.lower() for b in blacklist_estricta):
+                        detalle = cuerpo.replace(nombre, "").strip()
+                        detalle = " ".join(detalle.split())
+                        
                         registros.append({
                             "Entidad Encontrada": nombre,
                             "Ubicación / Sede": "Red ES-OPENSCREEN",
-                            "Rol / Detalle": detalle_limpio[:180] + "..." if len(detalle_limpio) > 180 else (detalle_limpio or "Nodo ES-OPENSCREEN"),
+                            "Rol / Detalle": detalle[:180] + "..." if len(detalle) > 180 else (detalle or "Nodo ES-OPENSCREEN"),
                             "Directorio de Origen": "ES-OPENSCREEN",
                             "Texto Buscable": f"{nombre} {cuerpo}".lower()
                         })
     except Exception as e:
-        print(f"Error ES-OpenScreen: {e}")
+        print(f"Error ES-OPENSCREEN: {e}")
 
     df_global = pd.DataFrame(registros)
     if not df_global.empty:
@@ -166,7 +195,7 @@ def cargar_y_indexar_total():
 with st.spinner("Indexando BioLynx, AseBio y ES-OPENSCREEN..."):
     df_master = cargar_y_indexar_total()
 
-st.success(f"Base de datos global indexada correctamente con **{len(df_master)} registros** limpios entre los 3 directorios.")
+st.success(f"Base de datos global indexada correctamente con **{len(df_master)} registros** entre los 3 directorios.")
 
 buscar = st.text_input("🔍 Introduce un término de búsqueda (ej: Madrid, CSIC, Cáncer, Barcelona, Screening):")
 
