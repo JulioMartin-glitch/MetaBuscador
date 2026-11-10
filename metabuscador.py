@@ -55,18 +55,29 @@ def procesar_ficha_openscreen(url_partner, headers):
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             
-            # Buscamos el título principal de la ficha del nodo/partner
-            h1 = soup.find('h1') or soup.find('h2')
-            nombre = h1.text.strip() if h1 else "Nodo ES-OPENSCREEN"
-            
-            # Limpiamos nombres genéricos de la web
-            if len(nombre) < 3 or "observatorio" in nombre.lower():
-                # Intentamos buscar el título de la página o breadcrumb relevante
-                title_tag = soup.find('title')
-                nombre = title_tag.text.split('|')[0].strip() if title_tag else "Nodo ES-OPENSCREEN"
+            # Limpiamos elementos innecesarios de la web (menús, footers, etc.)
+            for element in soup(["nav", "footer", "header", "aside", "script", "style"]):
+                element.decompose()
 
-            cuerpo = " ".join([p.text.strip() for p in soup.find_all(['p', 'div', 'li', 'td']) if len(p.text.strip()) > 3])
+            # Buscamos el título limpio
+            h1 = soup.find('h1')
+            nombre = h1.text.strip() if h1 else ""
             
+            if not nombre or len(nombre) < 3 or any(w in nombre.lower() for w in ['archive', 'partners', 'sobre el nodo', 'observatorio']):
+                title_tag = soup.find('title')
+                if title_tag:
+                    nombre = title_tag.text.split('|')[0].split('-')[0].strip()
+            
+            if not nombre:
+                nombre = "Nodo ES-OPENSCREEN"
+
+            # Extraemos texto solo del contenedor principal
+            contenido_principal = soup.find('main') or soup.find('article') or soup.find('div', class_='content') or soup
+            cuerpo = " ".join([p.text.strip() for p in contenido_principal.find_all(['p', 'div', 'li', 'td']) if len(p.text.strip()) > 3])
+            
+            # Limpiamos duplicados extraños de texto concatenado
+            cuerpo = " ".join(dict.fromkeys(cuerpo.split())) 
+
             return {
                 "Entidad Encontrada": nombre,
                 "Ubicación / Sede": "Red ES-OPENSCREEN",
@@ -135,7 +146,7 @@ def cargar_y_indexar_total():
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Estructurado y Limpio)
+    # 3. FUENTE: ES-OPENSCREEN (Filtrado Limpio)
     # -------------------------------------------------------------------------
     try:
         url_openscreen = "https://www.es-openscreen.com/partner/"
@@ -144,7 +155,6 @@ def cargar_y_indexar_total():
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
             urls_os = set()
             
-            # Extraemos enlaces específicos de socios/partners de ES-OPENSCREEN
             for a in soup_os.find_all('a', href=True):
                 href = a['href']
                 if any(sub in href for sub in ['/partner/', '/nodo/', '/member/', '/socio/']):
@@ -152,7 +162,6 @@ def cargar_y_indexar_total():
                         full_url = href if href.startswith('http') else "https://www.es-openscreen.com" + href
                         urls_os.add(full_url)
             
-            # Si encontramos fichas internas, las procesamos limpiamente en paralelo
             if urls_os:
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     futures = [executor.submit(procesar_ficha_openscreen, url, headers) for url in urls_os]
@@ -160,20 +169,6 @@ def cargar_y_indexar_total():
                         res = future.result()
                         if res:
                             registros.append(res)
-            
-            # Si no hay subpáginas pero hay bloques estructurados de partners principales en la home
-            for block in soup_os.find_all(['div', 'article'], class_=['partner', 'node', 'member', 'card']):
-                title_el = block.find(['h3', 'h4', 'h5'])
-                if title_el:
-                    nombre = title_el.text.strip()
-                    cuerpo = block.text.strip()
-                    registros.append({
-                        "Entidad Encontrada": nombre,
-                        "Ubicación / Sede": "Red ES-OPENSCREEN",
-                        "Rol / Detalle": cuerpo[:180] + "..." if len(cuerpo) > 180 else "Nodo ES-OPENSCREEN",
-                        "Directorio de Origen": "ES-OPENSCREEN",
-                        "Texto Buscable": f"{nombre} {cuerpo}".lower()
-                    })
     except Exception as e:
         print(f"Error ES-OPENSCREEN: {e}")
 
