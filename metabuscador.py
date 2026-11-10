@@ -106,49 +106,55 @@ def cargar_y_indexar_total():
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Extracción Limpia y Filtrada)
+    # 3. FUENTE: ES-OPENSCREEN (Vista Mapa/Listado Directa)
     # -------------------------------------------------------------------------
     try:
-        url_openscreen = "https://www.es-openscreen.com/partner/"
+        url_openscreen = "https://www.es-openscreen.com/partner/?view=map&s="
         res_os = requests.get(url_openscreen, headers=headers, timeout=10, verify=False)
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
             
-            # Buscamos bloques de tarjetas o contenedores de socios/nodos
-            bloques = soup_os.find_all(['article', 'div', 'section'], class_=lambda x: x and any(c in str(x).lower() for c in ['partner', 'node', 'member', 'grid', 'item', 'entry']))
+            # Buscamos elementos de lista o bloques específicos de la vista de partners
+            elementos_lista = soup_os.find_all(['div', 'li', 'article', 'tr'], class_=lambda x: x and any(c in str(x).lower() for c in ['partner', 'node', 'member', 'item', 'list', 'marker']))
             
-            if not bloques:
-                bloques = soup_os.find_all(['div', 'li', 'section'])
+            if not elementos_lista:
+                elementos_lista = soup_os.find_all(['div', 'li'])
 
-            for bloque in bloques:
-                titulo_el = bloque.find(['h2', 'h3', 'h4', 'strong', 'h1'])
+            blacklist_openscreen = [
+                'archive', 'partners', 'menu', 'contacto', 'aviso', 'cookie', 
+                'quiero participar', 'observatorio', 'inicio', 'home', 'red es-openscreen',
+                'inicia sesión', 'nombre de usuario', 'contraseña', 'recuérdame'
+            ]
+
+            for el in elementos_lista:
+                # Buscamos un título o texto destacado dentro del elemento
+                titulo_el = el.find(['h2', 'h3', 'h4', 'strong', 'b', 'a'])
                 if titulo_el:
-                    nombre_bruto = titulo_el.text.strip()
+                    nombre = titulo_el.text.strip()
+                    cuerpo = el.text.strip()
                     
-                    # Limpiamos prefijos típicos como "Coordinador:"
-                    nombre_limpio = nombre_bruto.replace("Coordinador:", "").replace("Partner:", "").strip()
-                    cuerpo = bloque.text.strip()
-                    
-                    # Lista negra estricta para eliminar texto basura de la web
-                    palabras_basura = ['archive', 'partners', 'menu', 'contacto', 'aviso', 'cookie', 'quiero participar', 'observatorio', 'inicio']
-                    
-                    if len(nombre_limpio) > 4 and not any(w in nombre_limpio.lower() for w in palabras_basura):
-                        detalle_limpio = cuerpo.replace(nombre_bruto, "").strip()
-                        detalle_limpio = " ".join(dict.fromkeys(detalle_limpio.split())) # Elimina palabras duplicadas consecutivas
-                        
+                    # Limpiamos prefijos
+                    for prefijo in ["Coordinador:", "Coordinator:", "Partner:", "Nodo:"]:
+                        if nombre.lower().startswith(prefijo.lower()):
+                            nombre = nombre[len(prefijo):].strip()
+
+                    # Verificamos que sea un nombre válido y no basura de interfaz
+                    if 4 <= len(nombre) <= 120 and not any(w in nombre.lower() for w in blacklist_openscreen):
+                        detalle_limpio = cuerpo.replace(nombre, "").strip()
+                        detalle_limpio = " ".join(detalle_limpio.split())
+
                         registros.append({
-                            "Entidad Encontrada": nombre_limpio,
+                            "Entidad Encontrada": nombre,
                             "Ubicación / Sede": "Red ES-OPENSCREEN",
                             "Rol / Detalle": detalle_limpio[:180] + "..." if len(detalle_limpio) > 180 else (detalle_limpio or "Nodo ES-OPENSCREEN"),
                             "Directorio de Origen": "ES-OPENSCREEN",
-                            "Texto Buscable": f"{nombre_limpio} {cuerpo}".lower()
+                            "Texto Buscable": f"{nombre} {cuerpo}".lower()
                         })
     except Exception as e:
         print(f"Error ES-OpenScreen: {e}")
 
     df_global = pd.DataFrame(registros)
     if not df_global.empty:
-        # Eliminamos duplicados tanto por nombre de entidad como por texto buscable
         df_global = df_global.drop_duplicates(subset=["Entidad Encontrada"])
         df_global = df_global.drop_duplicates(subset=["Texto Buscable"])
         
