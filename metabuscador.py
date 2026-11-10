@@ -3,8 +3,6 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import urllib3
-import re
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Desactivamos advertencias de seguridad SSL
@@ -29,11 +27,11 @@ with col3:
 st.divider()
 
 # =========================================================================
-# FUNCIONES AUXILIARES DE RASTREO PARALELO
+# FUNCIONES AUXILIARES DE RASTREO PARALELO ROBUSTO
 # =========================================================================
 def procesar_ficha_asebio(url_socio, headers):
     try:
-        res = requests.get(url_socio, headers=headers, timeout=4, verify=False)
+        res = requests.get(url_socio, headers=headers, timeout=5, verify=False)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             h1 = soup.find('h1')
@@ -51,10 +49,31 @@ def procesar_ficha_asebio(url_socio, headers):
         pass
     return None
 
+def procesar_ficha_openscreen(url_partner, headers):
+    try:
+        res = requests.get(url_partner, headers=headers, timeout=5, verify=False)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            h1 = soup.find(['h1', 'h2'])
+            nombre = h1.text.strip() if h1 else "Nodo ES-OPENSCREEN"
+            cuerpo = " ".join([p.text.strip() for p in soup.find_all(['p', 'div', 'li', 'td']) if len(p.text.strip()) > 3])
+            
+            if len(nombre) > 3 and "archive" not in nombre.lower():
+                return {
+                    "Entidad Encontrada": nombre,
+                    "Ubicación / Sede": "Red ES-OPENSCREEN",
+                    "Rol / Detalle": cuerpo[:180] + "..." if len(cuerpo) > 180 else "Nodo ES-OPENSCREEN",
+                    "Directorio de Origen": "ES-OPENSCREEN",
+                    "Texto Buscable": f"{nombre} {cuerpo} {url_partner}".lower()
+                }
+    except:
+        pass
+    return None
+
 # =========================================================================
-# FUNCIÓN CACHEADA: Indexación total rápida en paralelo
+# FUNCIÓN CACHEADA: Indexación total con alta retención
 # =========================================================================
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400) # Caché ampliada a 24 horas para estabilidad total
 def cargar_y_indexar_total():
     registros = []
     headers = {
@@ -66,7 +85,7 @@ def cargar_y_indexar_total():
     # -------------------------------------------------------------------------
     try:
         url_mapa = "https://www.google.com/maps/d/u/0/kml?mid=1hCVAxvUdzUIu6XVaoNjTDvfckdBavpI&forcekml=1"
-        res_mapa = requests.get(url_mapa, headers=headers, timeout=10, verify=False)
+        res_mapa = requests.get(url_mapa, headers=headers, timeout=12, verify=False)
         if res_mapa.status_code == 200:
             soup_mapa = BeautifulSoup(res_mapa.text, 'xml')
             for marcador in soup_mapa.find_all('Placemark'):
@@ -84,11 +103,11 @@ def cargar_y_indexar_total():
         print(f"Error BioLynx: {e}")
 
     # -------------------------------------------------------------------------
-    # 2. FUENTE: ASEBIO (Indexación Profunda en Paralelo)
+    # 2. FUENTE: ASEBIO (Indexación Profunda Masiva)
     # -------------------------------------------------------------------------
     try:
         url_asebio = "https://www.asebio.com/socios/directorio-empresas-biotecnologia"
-        res_ab = requests.get(url_asebio, headers=headers, timeout=10, verify=False)
+        res_ab = requests.get(url_asebio, headers=headers, timeout=12, verify=False)
         if res_ab.status_code == 200:
             soup_ab = BeautifulSoup(res_ab.text, 'html.parser')
             urls_ab = set()
@@ -98,7 +117,7 @@ def cargar_y_indexar_total():
                     full_url = href if href.startswith('http') else "https://www.asebio.com" + href
                     urls_ab.add(full_url)
 
-            with ThreadPoolExecutor(max_workers=10) as executor:
+            with ThreadPoolExecutor(max_workers=15) as executor:
                 futures = [executor.submit(procesar_ficha_asebio, url, headers) for url in urls_ab]
                 for future in as_completed(futures):
                     res = future.result()
@@ -108,74 +127,42 @@ def cargar_y_indexar_total():
         print(f"Error AseBio: {e}")
 
     # -------------------------------------------------------------------------
-    # 3. FUENTE: ES-OPENSCREEN (Extracción de Scripts/Mapa JSON + Nodos Limpios)
+    # 3. FUENTE: ES-OPENSCREEN (Rastreo Dual: Subpáginas + Home Estructurada)
     # -------------------------------------------------------------------------
     try:
-        url_openscreen = "https://www.es-openscreen.com/partner/?view=map&s="
+        url_openscreen = "https://www.es-openscreen.com/partner/"
         res_os = requests.get(url_openscreen, headers=headers, timeout=12, verify=False)
         if res_os.status_code == 200:
             soup_os = BeautifulSoup(res_os.text, 'html.parser')
+            urls_os = set()
             
-            # 1. Intentar extraer los marcadores JSON inyectados en los scripts del mapa
-            nodos_encontrados = False
-            scripts = soup_os.find_all('script')
-            for script in scripts:
-                if script.string and ('marker' in script.string.lower() or 'partner' in script.string.lower()):
-                    matches = re.findall(r'\{[^{}]*"title"[^{}]*\}|\{[^{}]*"name"[^{}]*\}', script.string)
-                    for match in matches:
-                        try:
-                            data = json.loads(match)
-                            nombre_nodo = data.get('title') or data.get('name')
-                            if nombre_nodo and len(nombre_nodo) > 3:
-                                registros.append({
-                                    "Entidad Encontrada": nombre_nodo.strip(),
-                                    "Ubicación / Sede": "Red ES-OPENSCREEN",
-                                    "Rol / Detalle": f"Nodo / Plataforma ES-OPENSCREEN - {data.get('address', '')}".strip(),
-                                    "Directorio de Origen": "ES-OPENSCREEN",
-                                    "Texto Buscable": f"{nombre_nodo} {data.get('address', '')}".lower()
-                                })
-                                nodos_encontrados = True
-                        except:
-                            continue
-
-            # 2. Si no viene en JSON de Script, desestructurar tarjetas quitando Menús y Logins
-            if not nodos_encontrados:
-                for elemento_basura in soup_os(['header', 'footer', 'nav', 'aside', 'form']):
-                    elemento_basura.decompose()
-                    
-                bloques = soup_os.find_all(['article', 'div'], class_=lambda x: x and any(c in str(x).lower() for c in ['post', 'type-partner', 'partner-item', 'location-item', 'map-list']))
-                
-                if not bloques:
-                    main_content = soup_os.find('main') or soup_os.find('div', id='content') or soup_os
-                    bloques = main_content.find_all(['h2', 'h3', 'h4'])
-
-                blacklist_estricta = [
-                    'inicia sesión', 'usuario', 'contraseña', 'recuérdame', 'observatorio',
-                    'quiero participar', 'comité', 'arsenio', 'sofía', 'beatriz', 'raquel',
-                    'amelia', 'lourdes', 'emilio', 'jordi', 'archive', 'partners archive'
-                ]
-
-                for el in bloques:
-                    if el.name in ['h2', 'h3', 'h4']:
-                        nombre = el.text.strip()
-                        cuerpo = el.parent.text.strip() if el.parent else nombre
-                    else:
-                        titulo_el = el.find(['h2', 'h3', 'h4', 'strong', 'a'])
-                        nombre = titulo_el.text.strip() if titulo_el else ""
-                        cuerpo = el.text.strip()
-
-                    for prefijo in ["Coordinador:", "Coordinator:", "Partner:", "Nodo:"]:
-                        if nombre.lower().startswith(prefijo.lower()):
-                            nombre = nombre[len(prefijo):].strip()
-
-                    if len(nombre) > 4 and not any(b in nombre.lower() for b in blacklist_estricta):
-                        detalle = cuerpo.replace(nombre, "").strip()
-                        detalle = " ".join(detalle.split())
-                        
+            for a in soup_os.find_all('a', href=True):
+                href = a['href']
+                if any(sub in href for sub in ['/partner/', '/nodo/', '/member/']):
+                    if len(href) > 10 and not href.endswith('/partner/'):
+                        full_url = href if href.startswith('http') else "https://www.es-openscreen.com" + href
+                        urls_os.add(full_url)
+            
+            # Paralelizamos la lectura de sus fichas
+            if urls_os:
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = [executor.submit(procesar_ficha_openscreen, url, headers) for url in urls_os]
+                    for future in as_completed(futures):
+                        res = future.result()
+                        if res:
+                            registros.append(res)
+            
+            # Respaldo de bloques directos en la página de partners para no perder volumen
+            for block in soup_os.find_all(['div', 'article', 'section'], class_=lambda x: x and any(c in str(x).lower() for c in ['partner', 'node', 'member', 'item'])):
+                title_el = block.find(['h3', 'h4', 'strong'])
+                if title_el:
+                    nombre = title_el.text.strip()
+                    cuerpo = block.text.strip()
+                    if len(nombre) > 3 and "archive" not in nombre.lower():
                         registros.append({
                             "Entidad Encontrada": nombre,
                             "Ubicación / Sede": "Red ES-OPENSCREEN",
-                            "Rol / Detalle": detalle[:180] + "..." if len(detalle) > 180 else (detalle or "Nodo ES-OPENSCREEN"),
+                            "Rol / Detalle": cuerpo[:180] + "..." if len(cuerpo) > 180 else "Nodo ES-OPENSCREEN",
                             "Directorio de Origen": "ES-OPENSCREEN",
                             "Texto Buscable": f"{nombre} {cuerpo}".lower()
                         })
@@ -184,18 +171,16 @@ def cargar_y_indexar_total():
 
     df_global = pd.DataFrame(registros)
     if not df_global.empty:
-        df_global = df_global.drop_duplicates(subset=["Entidad Encontrada"])
         df_global = df_global.drop_duplicates(subset=["Texto Buscable"])
-        
     return df_global
 
 # =========================================================================
 # EJECUCIÓN E INTERFAZ DE BÚSQUEDA
 # =========================================================================
-with st.spinner("Indexando BioLynx, AseBio y ES-OPENSCREEN..."):
+with st.spinner("Indexando masivamente BioLynx, AseBio y ES-OPENSCREEN..."):
     df_master = cargar_y_indexar_total()
 
-st.success(f"Base de datos global indexada correctamente con **{len(df_master)} registros** entre los 3 directorios.")
+st.success(f"Base de datos global indexada correctamente con **{len(df_master)} registros** estables y listos.")
 
 buscar = st.text_input("🔍 Introduce un término de búsqueda (ej: Madrid, CSIC, Cáncer, Barcelona, Screening):")
 
